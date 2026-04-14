@@ -21,6 +21,7 @@ from deepclaw.safety import (
     format_warning,
     redact_secrets,
 )
+from deepclaw.state_cache import invalidate_thread_state
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +41,18 @@ _REDACT_OUTPUT_TOOLS = frozenset(
         "glob",
         "ls",
         *_WEB_FETCH_TOOLS,
+    }
+)
+
+_MUTATING_CONTEXT_TOOLS = frozenset(
+    {
+        "memory_add",
+        "memory_replace",
+        "memory_remove",
+        "skill_create",
+        "skill_update",
+        "skill_install",
+        "skill_delete",
     }
 )
 
@@ -149,7 +162,11 @@ if AgentMiddleware is not None and ToolCallRequest is not None:
         - File writes: denied paths blocked outright
         - URL fetches: SSRF-unsafe URLs blocked
         - All tool output: credential patterns redacted
+        - Mutating memory/skills tools invalidate cached thread state for the next turn
         """
+
+        def __init__(self, checkpointer: Any = None):
+            self._checkpointer = checkpointer
 
         async def awrap_tool_call(
             self,
@@ -179,6 +196,12 @@ if AgentMiddleware is not None and ToolCallRequest is not None:
 
             # --- Execute the tool ---
             result = await handler(request)
+
+            # --- Post-execution: invalidate cached context after mutating tools ---
+            if tool_name in _MUTATING_CONTEXT_TOOLS and self._checkpointer is not None:
+                thread_id = request.runtime.config.get("configurable", {}).get("thread_id")
+                if thread_id:
+                    await invalidate_thread_state(self._checkpointer, str(thread_id))
 
             # --- Post-execution: redact secrets from output ---
             if isinstance(result, ToolMessage) and tool_name in _REDACT_OUTPUT_TOOLS:

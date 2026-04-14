@@ -2,14 +2,12 @@
 
 import logging
 import os
-from typing import Any
 
 from deepagents import create_deep_agent
 from deepagents.backends import LocalShellBackend
 from deepagents.backends.filesystem import FilesystemBackend
 from deepagents.middleware.memory import MemoryMiddleware
 from deepagents.middleware.skills import SkillsMiddleware
-from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
 from deepclaw.config import CHECKPOINTER_DB_PATH, CONFIG_DIR
@@ -97,76 +95,12 @@ This file is your persistent memory. Update it as you learn from conversations.
 """
 
 
-class ReloadingMemoryMiddleware(MemoryMiddleware):
-    """Reload AGENTS.md from disk on every turn instead of caching per thread."""
-
-    def before_agent(
-        self,
-        state: Any,
-        runtime: Any,
-        config: RunnableConfig | None = None,
-    ):
-        fresh_state = dict(state)
-        fresh_state.pop("memory_contents", None)
-        return super().before_agent(fresh_state, runtime, config)
-
-    async def abefore_agent(
-        self,
-        state: Any,
-        runtime: Any,
-        config: RunnableConfig | None = None,
-    ):
-        fresh_state = dict(state)
-        fresh_state.pop("memory_contents", None)
-        return await super().abefore_agent(fresh_state, runtime, config)
-
-
-class ReloadingSkillsMiddleware(SkillsMiddleware):
-    """Reload installed skill metadata on every turn instead of caching per thread."""
-
-    def before_agent(
-        self,
-        state: Any,
-        runtime: Any,
-        config: RunnableConfig | None = None,
-    ):
-        fresh_state = dict(state)
-        fresh_state.pop("skills_metadata", None)
-        return super().before_agent(fresh_state, runtime, config)
-
-    async def abefore_agent(
-        self,
-        state: Any,
-        runtime: Any,
-        config: RunnableConfig | None = None,
-    ):
-        fresh_state = dict(state)
-        fresh_state.pop("skills_metadata", None)
-        return await super().abefore_agent(fresh_state, runtime, config)
-
-
-def _list_installed_skill_names(limit: int = 12) -> list[str]:
-    if not SKILLS_DIR.exists():
-        return []
-
-    names = []
-    for path in sorted(SKILLS_DIR.iterdir()):
-        if not path.is_dir():
-            continue
-        if (path / "SKILL.md").is_file():
-            names.append(path.name)
-    return names[:limit]
-
-
 def _build_runtime_context(model: str | None) -> str:
-    skill_names = _list_installed_skill_names()
-    installed_skills = ", ".join(skill_names) if skill_names else "(none installed yet)"
     return (
         "\n\n## Runtime Context\n"
         f"- Active model: {model or 'not set'}\n"
         f"- Memory file: {MEMORY_FILE}\n"
         f"- Local skills directory: {SKILLS_DIR}\n"
-        f"- Installed local skills: {installed_skills}\n"
         "- For durable memory changes, use the explicit memory_add, memory_search, memory_replace, and memory_remove tools. Do not just say you will remember something — actually call the memory tool.\n"
         "- For reusable workflows, check local skills first. Use skills_list to confirm what is installed and skill_view to read a skill before saying a skill is unavailable or before improvising.\n"
         "- If a user mentions a specific skill name, verify it with skills_list or skill_view instead of guessing from memory.\n"
@@ -215,7 +149,7 @@ def create_agent(config, checkpointer):
     # Middleware stack
     middleware = []
     if SafetyMiddleware is not None:
-        middleware.append(SafetyMiddleware())
+        middleware.append(SafetyMiddleware(checkpointer=checkpointer))
     else:
         logger.warning("SafetyMiddleware is not available — safety checks disabled")
 
@@ -224,7 +158,7 @@ def create_agent(config, checkpointer):
     # Memory (AGENTS.md — agent learns and persists across sessions)
     memory_sources = _setup_memory()
     middleware.append(
-        ReloadingMemoryMiddleware(
+        MemoryMiddleware(
             backend=fs_backend,
             sources=memory_sources,
         )
@@ -233,7 +167,7 @@ def create_agent(config, checkpointer):
     # Skills
     skills_sources = _setup_skills()
     middleware.append(
-        ReloadingSkillsMiddleware(
+        SkillsMiddleware(
             backend=fs_backend,
             sources=skills_sources,
         )
