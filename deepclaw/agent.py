@@ -9,6 +9,7 @@ from deepagents.backends import LocalShellBackend
 from deepagents.backends.filesystem import FilesystemBackend
 from deepagents.middleware.memory import MemoryMiddleware
 from deepagents.middleware.skills import SkillsMiddleware
+from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
 from deepclaw.config import CHECKPOINTER_DB_PATH, CONFIG_DIR
@@ -99,12 +100,22 @@ This file is your persistent memory. Update it as you learn from conversations.
 class ReloadingMemoryMiddleware(MemoryMiddleware):
     """Reload AGENTS.md from disk on every turn instead of caching per thread."""
 
-    def before_agent(self, state: Any, runtime: Any, config: Any):
+    def before_agent(
+        self,
+        state: Any,
+        runtime: Any,
+        config: RunnableConfig | None = None,
+    ):
         fresh_state = dict(state)
         fresh_state.pop("memory_contents", None)
         return super().before_agent(fresh_state, runtime, config)
 
-    async def abefore_agent(self, state: Any, runtime: Any, config: Any):
+    async def abefore_agent(
+        self,
+        state: Any,
+        runtime: Any,
+        config: RunnableConfig | None = None,
+    ):
         fresh_state = dict(state)
         fresh_state.pop("memory_contents", None)
         return await super().abefore_agent(fresh_state, runtime, config)
@@ -113,12 +124,22 @@ class ReloadingMemoryMiddleware(MemoryMiddleware):
 class ReloadingSkillsMiddleware(SkillsMiddleware):
     """Reload installed skill metadata on every turn instead of caching per thread."""
 
-    def before_agent(self, state: Any, runtime: Any, config: Any):
+    def before_agent(
+        self,
+        state: Any,
+        runtime: Any,
+        config: RunnableConfig | None = None,
+    ):
         fresh_state = dict(state)
         fresh_state.pop("skills_metadata", None)
         return super().before_agent(fresh_state, runtime, config)
 
-    async def abefore_agent(self, state: Any, runtime: Any, config: Any):
+    async def abefore_agent(
+        self,
+        state: Any,
+        runtime: Any,
+        config: RunnableConfig | None = None,
+    ):
         fresh_state = dict(state)
         fresh_state.pop("skills_metadata", None)
         return await super().abefore_agent(fresh_state, runtime, config)
