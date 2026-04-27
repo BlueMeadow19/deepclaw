@@ -10,11 +10,15 @@ from types import ModuleType
 from langchain_core.messages import AIMessage, AIMessageChunk
 from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResult
 
+from deepclaw import headroom as headroom_mod
 from deepclaw.config import HeadroomConfig
-from deepclaw.headroom import wrap_model_with_headroom
+from deepclaw.headroom import get_headroom_runtime_stats, wrap_model_with_headroom
 
 
 class TestWrapModelWithHeadroom:
+    def setup_method(self):
+        headroom_mod._set_active_headroom_model(None)
+
     def test_returns_original_model_when_disabled(self):
         model = object()
 
@@ -297,3 +301,74 @@ class TestWrapModelWithHeadroom:
         result = rebound._generate(["hello"])
 
         assert result.generations[0].message.tool_calls == tool_message.tool_calls
+
+    def test_runtime_stats_return_inactive_defaults_when_no_model(self):
+        stats = get_headroom_runtime_stats()
+
+        assert stats["active"] is False
+        assert stats["summary"]["total_requests"] == 0
+        assert stats["recent"] == []
+
+    def test_runtime_stats_include_summary_and_recent_metrics(self, monkeypatch):
+        deepagents_models = ModuleType("deepagents._models")
+        deepagents_models.resolve_model = lambda model: object()
+
+        headroom_integrations = ModuleType("headroom.integrations")
+
+        class FakeHeadroomChatModel:
+            def __init__(self, model):
+                self.wrapped_model = model
+                self._metrics_history = [
+                    type(
+                        "Metrics",
+                        (),
+                        {
+                            "tokens_before": 100,
+                            "tokens_after": 40,
+                            "tokens_saved": 60,
+                            "savings_percent": 60.0,
+                            "transforms_applied": ["router:smart_crusher"],
+                        },
+                    )(),
+                    type(
+                        "Metrics",
+                        (),
+                        {
+                            "tokens_before": 80,
+                            "tokens_after": 50,
+                            "tokens_saved": 30,
+                            "savings_percent": 37.5,
+                            "transforms_applied": ["router:smart_crusher"],
+                        },
+                    )(),
+                ]
+
+            def get_savings_summary(self):
+                return {
+                    "total_requests": 2,
+                    "total_tokens_saved": 90,
+                    "average_savings_percent": 48.75,
+                    "total_tokens_before": 180,
+                    "total_tokens_after": 90,
+                }
+
+        headroom_integrations.HeadroomChatModel = FakeHeadroomChatModel
+
+        monkeypatch.setitem(sys.modules, "deepagents._models", deepagents_models)
+        monkeypatch.setitem(sys.modules, "headroom.integrations", headroom_integrations)
+
+        wrap_model_with_headroom("openai:gpt-5", HeadroomConfig(enabled=True))
+        stats = get_headroom_runtime_stats(recent_limit=1)
+
+        assert stats["active"] is True
+        assert stats["summary"]["total_tokens_saved"] == 90
+        assert stats["wrapped_model_class"] == "object"
+        assert stats["recent"] == [
+            {
+                "tokens_before": 80,
+                "tokens_after": 50,
+                "tokens_saved": 30,
+                "savings_percent": 37.5,
+                "transforms_applied": ["router:smart_crusher"],
+            }
+        ]

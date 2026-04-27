@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import AsyncIterator, Iterator
+from threading import Lock
 from typing import Any
 
 from langchain_core.language_models import BaseChatModel
@@ -14,6 +15,59 @@ from langchain_core.runnables.base import RunnableBinding
 from deepclaw.config import HeadroomConfig
 
 logger = logging.getLogger(__name__)
+_ACTIVE_HEADROOM_MODEL: Any | None = None
+_ACTIVE_HEADROOM_MODEL_LOCK = Lock()
+
+
+def _set_active_headroom_model(model: Any | None) -> None:
+    global _ACTIVE_HEADROOM_MODEL  # noqa: PLW0603
+    with _ACTIVE_HEADROOM_MODEL_LOCK:
+        _ACTIVE_HEADROOM_MODEL = model
+
+
+def get_headroom_runtime_stats(recent_limit: int = 5) -> dict[str, Any]:
+    """Return runtime Headroom savings stats for the currently active wrapped model."""
+    with _ACTIVE_HEADROOM_MODEL_LOCK:
+        active_model = _ACTIVE_HEADROOM_MODEL
+
+    if active_model is None:
+        return {
+            "active": False,
+            "message": "Headroom wrapper is not active in this process yet.",
+            "summary": {
+                "total_requests": 0,
+                "total_tokens_saved": 0,
+                "average_savings_percent": 0,
+                "total_tokens_before": 0,
+                "total_tokens_after": 0,
+            },
+            "recent": [],
+        }
+
+    summary_fn = getattr(active_model, "get_savings_summary", None)
+    summary = summary_fn() if callable(summary_fn) else {}
+    metrics_history = list(getattr(active_model, "_metrics_history", []) or [])
+    normalized_recent = []
+    for metrics in metrics_history[-max(recent_limit, 0) :]:
+        normalized_recent.append(
+            {
+                "tokens_before": getattr(metrics, "tokens_before", None),
+                "tokens_after": getattr(metrics, "tokens_after", None),
+                "tokens_saved": getattr(metrics, "tokens_saved", None),
+                "savings_percent": getattr(metrics, "savings_percent", None),
+                "transforms_applied": list(getattr(metrics, "transforms_applied", []) or []),
+            }
+        )
+    wrapped_model = getattr(active_model, "wrapped_model", None)
+    return {
+        "active": True,
+        "wrapper_class": active_model.__class__.__name__,
+        "wrapped_model_class": wrapped_model.__class__.__name__
+        if wrapped_model is not None
+        else None,
+        "summary": summary,
+        "recent": normalized_recent,
+    }
 
 
 def _invoke_kwargs(stop: list[str] | None, kwargs: dict[str, Any]) -> dict[str, Any]:
@@ -142,9 +196,11 @@ def wrap_model_with_headroom(
             rebound.headroom_config = self.headroom_config
             rebound.mode = self.mode
             rebound.auto_detect_provider = self.auto_detect_provider
+            _set_active_headroom_model(rebound)
             return rebound
 
     resolved_model = resolve_model(model)
     wrapped_model = DeepClawHeadroomChatModel(resolved_model)
+    _set_active_headroom_model(wrapped_model)
     logger.info("Headroom prompt compression enabled for %s", resolved_model.__class__.__name__)
     return wrapped_model

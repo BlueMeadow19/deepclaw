@@ -32,6 +32,7 @@ class TestDiscoverTools:
         assert "web_search" in tool_names
         assert "web_extract" in tool_names
         assert "vision_analyze" in tool_names
+        assert "headroom_stats" in tool_names
         assert "skills_list" in tool_names
         assert "skills_search_remote" in tool_names
         assert "skills_audit" in tool_names
@@ -262,6 +263,45 @@ class TestVisionPlugin:
         assert len(tools) == 1
         assert tools[0].__name__ == "vision_analyze"
 
+
+class TestHeadroomStatsPlugin:
+    def test_available(self):
+        from deepclaw.tools import headroom_stats as hs_mod
+
+        assert hs_mod.available() is True
+
+    def test_get_tools(self):
+        from deepclaw.tools import headroom_stats as hs_mod
+
+        tools = hs_mod.get_tools()
+        assert len(tools) == 1
+        assert tools[0].__name__ == "headroom_stats"
+
+    def test_returns_config_and_runtime_stats(self):
+        from deepclaw.tools import headroom_stats as hs_mod
+
+        fake_config = MagicMock()
+        fake_config.headroom.enabled = True
+        with (
+            patch("deepclaw.tools.headroom_stats.load_config", return_value=fake_config),
+            patch(
+                "deepclaw.tools.headroom_stats.get_headroom_runtime_stats",
+                return_value={
+                    "active": True,
+                    "summary": {"total_tokens_saved": 123},
+                    "recent": [{"tokens_saved": 50}],
+                },
+            ),
+        ):
+            result = hs_mod.headroom_stats(recent_limit=2)
+
+        assert result["config_enabled"] is True
+        assert result["active"] is True
+        assert result["summary"]["total_tokens_saved"] == 123
+        assert result["recent"] == [{"tokens_saved": 50}]
+
+
+class TestVisionPluginBehavior:
     def test_returns_error_without_openai_key(self):
         from deepclaw.tools.vision import vision_analyze
 
