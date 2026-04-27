@@ -7,8 +7,8 @@ import logging
 import sys
 from types import ModuleType
 
-from langchain_core.messages import AIMessage
-from langchain_core.outputs import ChatGeneration, ChatResult
+from langchain_core.messages import AIMessage, AIMessageChunk
+from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResult
 
 from deepclaw.config import HeadroomConfig
 from deepclaw.headroom import wrap_model_with_headroom
@@ -138,13 +138,60 @@ class TestWrapModelWithHeadroom:
         assert result.generations[0].message.tool_calls == tool_message.tool_calls
         assert result.generations[0].message.content == ""
 
-    def test_astream_uses_public_astream_for_runnable_binding(self, monkeypatch):
+    def test_stream_wraps_public_stream_chunks_for_runnable_binding(self, monkeypatch):
+        class FakeRunnableBinding:
+            def stream(self, messages, **kwargs):
+                yield AIMessageChunk(content="public-stream")
+
+            def _stream(self, messages, **kwargs):
+                yield ChatGenerationChunk(message=AIMessageChunk(content="private-stream"))
+
+        resolved_model = FakeRunnableBinding()
+
+        deepagents_models = ModuleType("deepagents._models")
+        deepagents_models.resolve_model = lambda model: resolved_model
+
+        headroom_integrations = ModuleType("headroom.integrations")
+
+        class FakeHeadroomChatModel:
+            def __init__(self, model):
+                self.wrapped_model = model
+
+            def _optimize_messages(self, messages):
+                metrics = type(
+                    "Metrics",
+                    (),
+                    {
+                        "tokens_before": 10,
+                        "tokens_after": 10,
+                        "tokens_saved": 0,
+                        "savings_percent": 0.0,
+                        "transforms_applied": [],
+                    },
+                )()
+                return messages, metrics
+
+        headroom_integrations.HeadroomChatModel = FakeHeadroomChatModel
+
+        monkeypatch.setitem(sys.modules, "deepagents._models", deepagents_models)
+        monkeypatch.setitem(sys.modules, "headroom.integrations", headroom_integrations)
+        monkeypatch.setattr("deepclaw.headroom.RunnableBinding", FakeRunnableBinding)
+
+        wrapped = wrap_model_with_headroom("openai:gpt-5", HeadroomConfig(enabled=True))
+
+        chunks = list(wrapped._stream(["hello"]))
+
+        assert len(chunks) == 1
+        assert isinstance(chunks[0], ChatGenerationChunk)
+        assert chunks[0].message.content == "public-stream"
+
+    def test_astream_wraps_public_astream_chunks_for_runnable_binding(self, monkeypatch):
         class FakeRunnableBinding:
             async def astream(self, messages, **kwargs):
-                yield "public-stream"
+                yield AIMessageChunk(content="public-stream")
 
             async def _astream(self, messages, **kwargs):
-                yield "private-stream"
+                yield ChatGenerationChunk(message=AIMessageChunk(content="private-stream"))
 
         resolved_model = FakeRunnableBinding()
 
@@ -182,7 +229,10 @@ class TestWrapModelWithHeadroom:
         async def _collect():
             return [chunk async for chunk in wrapped._astream(["hello"])]
 
-        assert asyncio.run(_collect()) == ["public-stream"]
+        chunks = asyncio.run(_collect())
+        assert len(chunks) == 1
+        assert isinstance(chunks[0], ChatGenerationChunk)
+        assert chunks[0].message.content == "public-stream"
 
     def test_bind_tools_preserves_deepclaw_wrapper_behavior(self, monkeypatch):
         tool_message = AIMessage(

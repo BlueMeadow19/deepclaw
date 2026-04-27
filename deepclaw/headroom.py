@@ -8,7 +8,7 @@ from typing import Any
 
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import BaseMessage
-from langchain_core.outputs import ChatGeneration, ChatResult
+from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResult
 from langchain_core.runnables.base import RunnableBinding
 
 from deepclaw.config import HeadroomConfig
@@ -102,10 +102,14 @@ def wrap_model_with_headroom(
         ) -> Iterator[Any]:
             if isinstance(self.wrapped_model, RunnableBinding):
                 optimized_messages, _metrics = self._optimize_messages(messages)
-                yield from self.wrapped_model.stream(
+                for chunk in self.wrapped_model.stream(
                     optimized_messages,
                     **_invoke_kwargs(stop, kwargs),
-                )
+                ):
+                    if isinstance(chunk, ChatGenerationChunk):
+                        yield chunk
+                    else:
+                        yield ChatGenerationChunk(message=chunk)
                 return
             yield from super()._stream(messages, stop=stop, run_manager=run_manager, **kwargs)
 
@@ -122,7 +126,10 @@ def wrap_model_with_headroom(
                     optimized_messages,
                     **_invoke_kwargs(stop, kwargs),
                 ):
-                    yield chunk
+                    if isinstance(chunk, ChatGenerationChunk):
+                        yield chunk
+                    else:
+                        yield ChatGenerationChunk(message=chunk)
                 return
             async for chunk in super()._astream(
                 messages, stop=stop, run_manager=run_manager, **kwargs
