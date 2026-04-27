@@ -189,6 +189,49 @@ class TestWrapModelWithHeadroom:
         assert isinstance(chunks[0], ChatGenerationChunk)
         assert chunks[0].message.content == "public-stream"
 
+    def test_stream_wraps_public_stream_ai_messages_for_runnable_binding(self, monkeypatch):
+        class FakeRunnableBinding:
+            def stream(self, messages, **kwargs):
+                yield AIMessage(content="public-message")
+
+        resolved_model = FakeRunnableBinding()
+
+        deepagents_models = ModuleType("deepagents._models")
+        deepagents_models.resolve_model = lambda model: resolved_model
+
+        headroom_integrations = ModuleType("headroom.integrations")
+
+        class FakeHeadroomChatModel:
+            def __init__(self, model):
+                self.wrapped_model = model
+
+            def _optimize_messages(self, messages):
+                metrics = type(
+                    "Metrics",
+                    (),
+                    {
+                        "tokens_before": 10,
+                        "tokens_after": 10,
+                        "tokens_saved": 0,
+                        "savings_percent": 0.0,
+                        "transforms_applied": [],
+                    },
+                )()
+                return messages, metrics
+
+        headroom_integrations.HeadroomChatModel = FakeHeadroomChatModel
+
+        monkeypatch.setitem(sys.modules, "deepagents._models", deepagents_models)
+        monkeypatch.setitem(sys.modules, "headroom.integrations", headroom_integrations)
+        monkeypatch.setattr("deepclaw.headroom.RunnableBinding", FakeRunnableBinding)
+
+        wrapped = wrap_model_with_headroom("openai:gpt-5", HeadroomConfig(enabled=True))
+        chunks = list(wrapped._stream(["hello"]))
+
+        assert len(chunks) == 1
+        assert isinstance(chunks[0], ChatGenerationChunk)
+        assert chunks[0].message.content == "public-message"
+
     def test_astream_wraps_public_astream_chunks_for_runnable_binding(self, monkeypatch):
         class FakeRunnableBinding:
             async def astream(self, messages, **kwargs):
@@ -237,6 +280,52 @@ class TestWrapModelWithHeadroom:
         assert len(chunks) == 1
         assert isinstance(chunks[0], ChatGenerationChunk)
         assert chunks[0].message.content == "public-stream"
+
+    def test_astream_wraps_public_astream_ai_messages_for_runnable_binding(self, monkeypatch):
+        class FakeRunnableBinding:
+            async def astream(self, messages, **kwargs):
+                yield AIMessage(content="public-message")
+
+        resolved_model = FakeRunnableBinding()
+
+        deepagents_models = ModuleType("deepagents._models")
+        deepagents_models.resolve_model = lambda model: resolved_model
+
+        headroom_integrations = ModuleType("headroom.integrations")
+
+        class FakeHeadroomChatModel:
+            def __init__(self, model):
+                self.wrapped_model = model
+
+            def _optimize_messages(self, messages):
+                metrics = type(
+                    "Metrics",
+                    (),
+                    {
+                        "tokens_before": 10,
+                        "tokens_after": 10,
+                        "tokens_saved": 0,
+                        "savings_percent": 0.0,
+                        "transforms_applied": [],
+                    },
+                )()
+                return messages, metrics
+
+        headroom_integrations.HeadroomChatModel = FakeHeadroomChatModel
+
+        monkeypatch.setitem(sys.modules, "deepagents._models", deepagents_models)
+        monkeypatch.setitem(sys.modules, "headroom.integrations", headroom_integrations)
+        monkeypatch.setattr("deepclaw.headroom.RunnableBinding", FakeRunnableBinding)
+
+        wrapped = wrap_model_with_headroom("openai:gpt-5", HeadroomConfig(enabled=True))
+
+        async def _collect():
+            return [chunk async for chunk in wrapped._astream(["hello"])]
+
+        chunks = asyncio.run(_collect())
+        assert len(chunks) == 1
+        assert isinstance(chunks[0], ChatGenerationChunk)
+        assert chunks[0].message.content == "public-message"
 
     def test_bind_tools_preserves_deepclaw_wrapper_behavior(self, monkeypatch):
         tool_message = AIMessage(

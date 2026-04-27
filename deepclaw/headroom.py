@@ -8,7 +8,7 @@ from threading import Lock
 from typing import Any
 
 from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import BaseMessage
+from langchain_core.messages import AIMessage, AIMessageChunk, BaseMessage
 from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResult
 from langchain_core.runnables.base import RunnableBinding
 
@@ -76,6 +76,19 @@ def _invoke_kwargs(stop: list[str] | None, kwargs: dict[str, Any]) -> dict[str, 
         invoke_kwargs.setdefault("stop", stop)
     invoke_kwargs.pop("run_manager", None)
     return invoke_kwargs
+
+
+def _as_generation_chunk(chunk: Any) -> ChatGenerationChunk:
+    if isinstance(chunk, ChatGenerationChunk):
+        return chunk
+    if isinstance(chunk, AIMessageChunk):
+        return ChatGenerationChunk(message=chunk)
+    if isinstance(chunk, AIMessage):
+        payload = chunk.model_dump()
+        payload["type"] = "AIMessageChunk"
+        return ChatGenerationChunk(message=AIMessageChunk(**payload))
+    msg = f"Unsupported streaming chunk type from Headroom wrapper: {type(chunk).__name__}"
+    raise TypeError(msg)
 
 
 def wrap_model_with_headroom(
@@ -160,10 +173,7 @@ def wrap_model_with_headroom(
                     optimized_messages,
                     **_invoke_kwargs(stop, kwargs),
                 ):
-                    if isinstance(chunk, ChatGenerationChunk):
-                        yield chunk
-                    else:
-                        yield ChatGenerationChunk(message=chunk)
+                    yield _as_generation_chunk(chunk)
                 return
             yield from super()._stream(messages, stop=stop, run_manager=run_manager, **kwargs)
 
@@ -180,10 +190,7 @@ def wrap_model_with_headroom(
                     optimized_messages,
                     **_invoke_kwargs(stop, kwargs),
                 ):
-                    if isinstance(chunk, ChatGenerationChunk):
-                        yield chunk
-                    else:
-                        yield ChatGenerationChunk(message=chunk)
+                    yield _as_generation_chunk(chunk)
                 return
             async for chunk in super()._astream(
                 messages, stop=stop, run_manager=run_manager, **kwargs
