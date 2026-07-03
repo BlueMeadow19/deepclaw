@@ -123,7 +123,9 @@ def _fatal_exception_message(exc: Exception) -> str:
             "Browserbase/Stagehand."
         )
     if "rate limit exceeded" in lowered or "error code: 429" in lowered:
-        return "Run failed: the model provider rate-limited this request (429). Please retry shortly."
+        return (
+            "Run failed: the model provider rate-limited this request (429). Please retry shortly."
+        )
     if "flood control exceeded" in lowered:
         return "Run failed: Telegram rate-limited this request. Please retry shortly."
     if "message is too long" in lowered:
