@@ -286,15 +286,17 @@ class TestBrowserbasePlugin:
                 raise ImportError("stagehand")
             return real_import_module(name)
 
+        def fake_get_env(key):
+            if key == "BROWSERBASE_API_KEY":
+                return "test-key"
+            if key == "BROWSERBASE_PROJECT_ID":
+                return "project-id"
+            if key == "STAGEHAND_MODEL_API_KEY":
+                return "model-key"
+            return ""
+
         with (
-            patch.dict(
-                os.environ,
-                {
-                    "BROWSERBASE_API_KEY": "test-key",
-                    "BROWSERBASE_PROJECT_ID": "project-id",
-                },
-                clear=True,
-            ),
+            patch("deepclaw.tools.browserbase._get_env", side_effect=fake_get_env),
             patch("deepclaw.tools.browserbase.import_module", side_effect=fake_import_module),
         ):
             result = browserbase_mod.browserbase_rendered_extract(
@@ -328,19 +330,21 @@ class TestBrowserbasePlugin:
                 return fake_module
             return real_import_module(name)
 
+        def fake_get_env(key):
+            if key == "BROWSERBASE_API_KEY":
+                return "test-key"
+            if key == "BROWSERBASE_PROJECT_ID":
+                return "project-id"
+            if key == "ANTHROPIC_API_KEY":
+                return "anthropic-key"
+            return ""
+
         main_thread = object()
         worker_thread = object()
         original_register = FakeStagehand._register_signal_handlers
 
         with (
-            patch.dict(
-                os.environ,
-                {
-                    "BROWSERBASE_API_KEY": "test-key",
-                    "BROWSERBASE_PROJECT_ID": "project-id",
-                },
-                clear=True,
-            ),
+            patch("deepclaw.tools.browserbase._get_env", side_effect=fake_get_env),
             patch("deepclaw.tools.browserbase.import_module", side_effect=fake_import_module),
             patch("deepclaw.tools.browserbase.threading.main_thread", return_value=main_thread),
             patch(
@@ -354,6 +358,147 @@ class TestBrowserbasePlugin:
         assert isinstance(result, FakeStagehand)
         assert register_calls == []
         assert FakeStagehand._register_signal_handlers is original_register
+
+    def test_rendered_extract_passes_model_api_key_to_stagehand(self):
+        from deepclaw.tools import browserbase as browserbase_mod
+
+        captured = {}
+
+        class FakeStagehand:
+            def __init__(self, **kwargs):
+                captured.update(kwargs)
+
+            async def init(self):
+                return None
+
+        fake_module = SimpleNamespace(Stagehand=FakeStagehand)
+        real_import_module = __import__("importlib").import_module
+
+        def fake_import_module(name):
+            if name == "stagehand":
+                return fake_module
+            return real_import_module(name)
+
+        def fake_get_env(key):
+            values = {
+                "BROWSERBASE_API_KEY": "test-key",
+                "BROWSERBASE_PROJECT_ID": "project-id",
+                "OPENAI_API_KEY": "openai-key",
+            }
+            return values.get(key, "")
+
+        with (
+            patch("deepclaw.tools.browserbase._get_env", side_effect=fake_get_env),
+            patch("deepclaw.tools.browserbase.import_module", side_effect=fake_import_module),
+        ):
+            result = asyncio.run(
+                browserbase_mod._create_stagehand(model_name="google/gemini-3-flash-preview")
+            )
+
+        assert isinstance(result, FakeStagehand)
+        assert captured["model_api_key"] == "openai-key"
+
+    def test_rendered_extract_prefers_provider_specific_model_keys(self):
+        from deepclaw.tools import browserbase as browserbase_mod
+
+        captured = []
+
+        class FakeStagehand:
+            def __init__(self, **kwargs):
+                captured.append(kwargs)
+
+            async def init(self):
+                return None
+
+        fake_module = SimpleNamespace(Stagehand=FakeStagehand)
+        real_import_module = __import__("importlib").import_module
+
+        def fake_import_module(name):
+            if name == "stagehand":
+                return fake_module
+            return real_import_module(name)
+
+        def fake_get_env_factory(values):
+            def fake_get_env(key):
+                return values.get(key, "")
+
+            return fake_get_env
+
+        with patch("deepclaw.tools.browserbase.import_module", side_effect=fake_import_module):
+            with patch(
+                "deepclaw.tools.browserbase._get_env",
+                side_effect=fake_get_env_factory(
+                    {
+                        "BROWSERBASE_API_KEY": "test-key",
+                        "BROWSERBASE_PROJECT_ID": "project-id",
+                        "BASETEN_API_KEY": "baseten-key",
+                    }
+                ),
+            ):
+                asyncio.run(browserbase_mod._create_stagehand(model_name="baseten:foo/bar"))
+            with patch(
+                "deepclaw.tools.browserbase._get_env",
+                side_effect=fake_get_env_factory(
+                    {
+                        "BROWSERBASE_API_KEY": "test-key",
+                        "BROWSERBASE_PROJECT_ID": "project-id",
+                        "DEEPINFRA_API_TOKEN": "deepinfra-key",
+                    }
+                ),
+            ):
+                asyncio.run(browserbase_mod._create_stagehand(model_name="deepinfra:foo/bar"))
+            with patch(
+                "deepclaw.tools.browserbase._get_env",
+                side_effect=fake_get_env_factory(
+                    {
+                        "BROWSERBASE_API_KEY": "test-key",
+                        "BROWSERBASE_PROJECT_ID": "project-id",
+                        "OPENROUTER_API_KEY": "openrouter-key",
+                    }
+                ),
+            ):
+                asyncio.run(
+                    browserbase_mod._create_stagehand(model_name="openrouter:openai/gpt-4o-mini")
+                )
+            with patch(
+                "deepclaw.tools.browserbase._get_env",
+                side_effect=fake_get_env_factory(
+                    {
+                        "BROWSERBASE_API_KEY": "test-key",
+                        "BROWSERBASE_PROJECT_ID": "project-id",
+                        "GROQ_API_KEY": "groq-key",
+                    }
+                ),
+            ):
+                asyncio.run(browserbase_mod._create_stagehand(model_name="groq:llama-3.3-70b"))
+
+        assert captured[0]["model_api_key"] == "baseten-key"
+        assert captured[1]["model_api_key"] == "deepinfra-key"
+        assert captured[2]["model_api_key"] == "openrouter-key"
+        assert captured[3]["model_api_key"] == "groq-key"
+
+    def test_rendered_extract_errors_when_model_api_key_missing(self):
+        from deepclaw.tools import browserbase as browserbase_mod
+
+        def fake_get_env(key):
+            if key == "BROWSERBASE_API_KEY":
+                return "test-key"
+            if key == "BROWSERBASE_PROJECT_ID":
+                return "project-id"
+            return ""
+
+        with patch("deepclaw.tools.browserbase._get_env", side_effect=fake_get_env):
+            result = asyncio.run(
+                browserbase_mod._create_stagehand(model_name="openrouter:openai/gpt-4o-mini")
+            )
+
+        assert result == {
+            "error": (
+                "Browserbase rendered tools unavailable: no model API key found for "
+                "openrouter:openai/gpt-4o-mini. Set one of: "
+                "STAGEHAND_MODEL_API_KEY, OPENROUTER_API_KEY, OPENAI_API_KEY."
+            )
+        }
 
     def test_search_success_uses_browserbase_sdk(self):
         from deepclaw.tools import browserbase as browserbase_mod
