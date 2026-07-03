@@ -1199,7 +1199,12 @@ class TestGatewayRedaction:
     async def test_gateway_replaces_already_streamed_progress_with_fatal_rate_limit_message(self):
         class _RateLimitedAgent:
             async def astream(self, *_args, **_kwargs):
-                yield (SimpleNamespace(content_blocks=[{"type": "text", "text": "Researching funding history..."}]), {})
+                yield (
+                    SimpleNamespace(
+                        content_blocks=[{"type": "text", "text": "Researching funding history..."}]
+                    ),
+                    {},
+                )
                 raise RuntimeError("Error code: 429 - {'error': 'Rate limit exceeded'}")
                 yield  # pragma: no cover
 

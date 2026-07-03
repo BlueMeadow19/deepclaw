@@ -24,6 +24,7 @@ _ENV_API_KEY = "BROWSERBASE_API_KEY"
 _ENV_PROJECT_ID = "BROWSERBASE_PROJECT_ID"
 _ENV_RENDER_MODEL = "STAGEHAND_MODEL"
 _ENV_AGENT_MODEL = "STAGEHAND_AGENT_MODEL"
+_ENV_MODEL_API_KEY = "STAGEHAND_MODEL_API_KEY"
 _DEFAULT_RENDER_MODEL = "google/gemini-3-flash-preview"
 _DEFAULT_AGENT_MODEL = "anthropic/claude-sonnet-4-6"
 _MAX_SEARCH_RESULTS = 10
@@ -79,6 +80,35 @@ def _require_project_id() -> str | None:
     if project_id:
         return project_id
     return None
+
+
+def _candidate_model_api_key_env_vars(model_name: str) -> tuple[str, ...]:
+    provider = (model_name.partition("/")[0] or model_name).strip().lower()
+    provider = provider.partition(":")[0]
+    if provider in {"google", "gemini"}:
+        return (_ENV_MODEL_API_KEY, "GOOGLE_API_KEY", "GEMINI_API_KEY")
+    if provider == "anthropic":
+        return (_ENV_MODEL_API_KEY, "ANTHROPIC_API_KEY", "ANTHROPIC_TOKEN")
+    if provider == "deepinfra":
+        return (_ENV_MODEL_API_KEY, "DEEPINFRA_API_TOKEN", "DEEPINFRA_API_KEY")
+    if provider == "baseten":
+        return (_ENV_MODEL_API_KEY, "BASETEN_API_KEY")
+    if provider == "openrouter":
+        return (_ENV_MODEL_API_KEY, "OPENROUTER_API_KEY")
+    if provider == "openai":
+        return (_ENV_MODEL_API_KEY, "OPENAI_API_KEY")
+    if provider == "groq":
+        return (_ENV_MODEL_API_KEY, "GROQ_API_KEY")
+    return (_ENV_MODEL_API_KEY,)
+
+
+def _resolve_model_api_key(model_name: str) -> tuple[str | None, tuple[str, ...]]:
+    candidates = _candidate_model_api_key_env_vars(model_name)
+    for env_name in candidates:
+        value = _get_env(env_name)
+        if value:
+            return value, candidates
+    return None, candidates
 
 
 def _check_public_url(url: str) -> str | None:
@@ -279,6 +309,14 @@ async def _create_stagehand(*, model_name: str):
             "Add it to ~/.deepclaw/.env or the environment."
         )
 
+    model_api_key, candidate_env_vars = _resolve_model_api_key(model_name)
+    if not model_api_key:
+        expected = ", ".join(candidate_env_vars)
+        return _error(
+            "Browserbase rendered tools unavailable: no model API key found for "
+            f"{model_name}. Set one of: {expected}."
+        )
+
     try:
         Stagehand = import_module("stagehand").Stagehand
     except ImportError:
@@ -293,6 +331,7 @@ async def _create_stagehand(*, model_name: str):
                 api_key=api_key,
                 project_id=project_id,
                 model_name=model_name,
+                model_api_key=model_api_key,
             )
         else:
             original_register_signal_handlers = Stagehand._register_signal_handlers
@@ -303,6 +342,7 @@ async def _create_stagehand(*, model_name: str):
                     api_key=api_key,
                     project_id=project_id,
                     model_name=model_name,
+                    model_api_key=model_api_key,
                 )
             finally:
                 Stagehand._register_signal_handlers = original_register_signal_handlers

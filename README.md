@@ -398,7 +398,7 @@ DeepClaw auto-discovers tool plugins from `deepclaw/tools/` at startup.
 | Plugin | Install | Env Var | Tools |
 |---|---|---|---|
 | `browser` | none | none | `browser_navigate`, `browser_snapshot`, `browser_click`, `browser_type`, `browser_press`, `browser_scroll`, `browser_screenshot`, `browser_close` |
-| `browserbase` | `browserbase`, `beautifulsoup4`, `stagehand` | `BROWSERBASE_API_KEY`, `BROWSERBASE_PROJECT_ID` (+ optional `STAGEHAND_MODEL`, `STAGEHAND_AGENT_MODEL`) | `browserbase_search`, `browserbase_fetch`, `browserbase_rendered_extract`, `browserbase_interactive_task` |
+| `browserbase` | `browserbase`, `beautifulsoup4`, `stagehand` | `BROWSERBASE_API_KEY`, `BROWSERBASE_PROJECT_ID` (+ optional `STAGEHAND_MODEL`, `STAGEHAND_AGENT_MODEL`, `STAGEHAND_MODEL_API_KEY`) | `browserbase_search`, `browserbase_fetch`, `browserbase_rendered_extract`, `browserbase_interactive_task` |
 | `cron` | none | none | `schedule`, `list_jobs`, `remove_job` |
 | `skills` | none | none | `skills_list`, `skills_search_remote`, `skill_view`, `skill_create`, `skill_update`, `skill_install`, `skill_delete` |
 | `vision` | none | `OPENAI_API_KEY` | `vision_analyze` |
@@ -438,6 +438,7 @@ Required environment variables for Browserbase-hosted use:
 Optional environment variables:
 - `STAGEHAND_MODEL` — model override for `browserbase_rendered_extract`
 - `STAGEHAND_AGENT_MODEL` — model override for `browserbase_interactive_task`
+- `STAGEHAND_MODEL_API_KEY` — override the provider/model API key passed to Stagehand for rendered Browserbase tools
 
 If those Browserbase credentials are absent, the Browserbase tools stay visible but return a clear error at call time instead of silently disappearing.
 
