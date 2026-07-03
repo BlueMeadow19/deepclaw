@@ -86,32 +86,20 @@ def _candidate_model_api_key_env_vars(model_name: str) -> tuple[str, ...]:
     provider = (model_name.partition("/")[0] or model_name).strip().lower()
     provider = provider.partition(":")[0]
     if provider in {"google", "gemini"}:
-        return (_ENV_MODEL_API_KEY, "GOOGLE_API_KEY", "GEMINI_API_KEY", "OPENAI_API_KEY")
+        return (_ENV_MODEL_API_KEY, "GOOGLE_API_KEY", "GEMINI_API_KEY")
     if provider == "anthropic":
         return (_ENV_MODEL_API_KEY, "ANTHROPIC_API_KEY", "ANTHROPIC_TOKEN")
     if provider == "deepinfra":
-        return (_ENV_MODEL_API_KEY, "DEEPINFRA_API_TOKEN", "DEEPINFRA_API_KEY", "OPENAI_API_KEY")
+        return (_ENV_MODEL_API_KEY, "DEEPINFRA_API_TOKEN", "DEEPINFRA_API_KEY")
     if provider == "baseten":
-        return (_ENV_MODEL_API_KEY, "BASETEN_API_KEY", "OPENAI_API_KEY")
+        return (_ENV_MODEL_API_KEY, "BASETEN_API_KEY")
     if provider == "openrouter":
-        return (_ENV_MODEL_API_KEY, "OPENROUTER_API_KEY", "OPENAI_API_KEY")
+        return (_ENV_MODEL_API_KEY, "OPENROUTER_API_KEY")
     if provider == "openai":
         return (_ENV_MODEL_API_KEY, "OPENAI_API_KEY")
     if provider == "groq":
-        return (_ENV_MODEL_API_KEY, "GROQ_API_KEY", "OPENAI_API_KEY")
-    return (
-        _ENV_MODEL_API_KEY,
-        "OPENAI_API_KEY",
-        "OPENROUTER_API_KEY",
-        "GROQ_API_KEY",
-        "ANTHROPIC_API_KEY",
-        "ANTHROPIC_TOKEN",
-        "GOOGLE_API_KEY",
-        "GEMINI_API_KEY",
-        "DEEPINFRA_API_TOKEN",
-        "DEEPINFRA_API_KEY",
-        "BASETEN_API_KEY",
-    )
+        return (_ENV_MODEL_API_KEY, "GROQ_API_KEY")
+    return (_ENV_MODEL_API_KEY,)
 
 
 def _resolve_model_api_key(model_name: str) -> tuple[str | None, tuple[str, ...]]:

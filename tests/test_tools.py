@@ -359,7 +359,7 @@ class TestBrowserbasePlugin:
         assert register_calls == []
         assert FakeStagehand._register_signal_handlers is original_register
 
-    def test_rendered_extract_passes_model_api_key_to_stagehand(self):
+    def test_rendered_extract_passes_provider_specific_model_api_key_to_stagehand(self):
         from deepclaw.tools import browserbase as browserbase_mod
 
         captured = {}
@@ -383,7 +383,7 @@ class TestBrowserbasePlugin:
             values = {
                 "BROWSERBASE_API_KEY": "test-key",
                 "BROWSERBASE_PROJECT_ID": "project-id",
-                "OPENAI_API_KEY": "openai-key",
+                "GOOGLE_API_KEY": "google-key",
             }
             return values.get(key, "")
 
@@ -396,7 +396,31 @@ class TestBrowserbasePlugin:
             )
 
         assert isinstance(result, FakeStagehand)
-        assert captured["model_api_key"] == "openai-key"
+        assert captured["model_api_key"] == "google-key"
+
+    def test_rendered_extract_does_not_reuse_openai_key_for_other_providers(self):
+        from deepclaw.tools import browserbase as browserbase_mod
+
+        def fake_get_env(key):
+            values = {
+                "BROWSERBASE_API_KEY": "test-key",
+                "BROWSERBASE_PROJECT_ID": "project-id",
+                "OPENAI_API_KEY": "openai-key",
+            }
+            return values.get(key, "")
+
+        with patch("deepclaw.tools.browserbase._get_env", side_effect=fake_get_env):
+            result = asyncio.run(
+                browserbase_mod._create_stagehand(model_name="google/gemini-3-flash-preview")
+            )
+
+        assert result == {
+            "error": (
+                "Browserbase rendered tools unavailable: no model API key found for "
+                "google/gemini-3-flash-preview. Set one of: "
+                "STAGEHAND_MODEL_API_KEY, GOOGLE_API_KEY, GEMINI_API_KEY."
+            )
+        }
 
     def test_rendered_extract_prefers_provider_specific_model_keys(self):
         from deepclaw.tools import browserbase as browserbase_mod
@@ -496,7 +520,31 @@ class TestBrowserbasePlugin:
             "error": (
                 "Browserbase rendered tools unavailable: no model API key found for "
                 "openrouter:openai/gpt-4o-mini. Set one of: "
-                "STAGEHAND_MODEL_API_KEY, OPENROUTER_API_KEY, OPENAI_API_KEY."
+                "STAGEHAND_MODEL_API_KEY, OPENROUTER_API_KEY."
+            )
+        }
+
+    def test_rendered_extract_errors_for_unknown_provider_without_stagehand_override(self):
+        from deepclaw.tools import browserbase as browserbase_mod
+
+        def fake_get_env(key):
+            if key == "BROWSERBASE_API_KEY":
+                return "test-key"
+            if key == "BROWSERBASE_PROJECT_ID":
+                return "project-id"
+            if key == "OPENAI_API_KEY":
+                return "openai-key"
+            return ""
+
+        with patch("deepclaw.tools.browserbase._get_env", side_effect=fake_get_env):
+            result = asyncio.run(
+                browserbase_mod._create_stagehand(model_name="custom:vendor/model")
+            )
+
+        assert result == {
+            "error": (
+                "Browserbase rendered tools unavailable: no model API key found for "
+                "custom:vendor/model. Set one of: STAGEHAND_MODEL_API_KEY."
             )
         }
 
