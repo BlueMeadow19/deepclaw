@@ -474,7 +474,18 @@ Before finalizing:
 
 OPENAI_MODEL_GUIDANCE_MODELS = ("gpt", "codex")
 
-TELEGRAM_FORMATTING_GUIDANCE = """\
+
+def _active_model_guidance(config: DeepClawConfig) -> str:
+    """Return a small explicit reminder of the currently configured model."""
+    active_model = (config.model or "not set").strip() or "not set"
+    return (
+        "## Active Model\n"
+        f"- Current configured model: {active_model}\n"
+        "- If the user asks which model you are using, answer with this configured model unless a newer runtime override is explicitly provided in the current conversation."
+    )
+
+
+TELEGRAM_FORMATTING_GUIDANCE = """\\
 ## Output Formatting
 - When responding in chat clients like Telegram, prefer concise, structured markdown over dense prose.
 - Lead with the answer in 1-2 lines before any detail.
@@ -682,6 +693,7 @@ def create_agent(config, checkpointer):
     system_prompt_parts = []
     if soul:
         system_prompt_parts.append(soul)
+    system_prompt_parts.append(_active_model_guidance(config))
     system_prompt_parts.append(TELEGRAM_FORMATTING_GUIDANCE)
     system_prompt_parts.append(TOOL_USE_ENFORCEMENT)
 

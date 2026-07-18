@@ -464,6 +464,7 @@ class TestCreateAgent:
 
         assert result == "agent"
         assert agent_mod.TOOL_USE_ENFORCEMENT in captured["system_prompt"]
+        assert "Current configured model: openai:gpt-5.3-codex" in captured["system_prompt"]
         assert agent_mod.OPENAI_MODEL_EXECUTION_GUIDANCE in captured["system_prompt"]
         assert "prefer markdown tables over prose lists" in captured["system_prompt"]
         assert "format it as a table first" in captured["system_prompt"]
@@ -513,6 +514,7 @@ class TestCreateAgent:
 
         assert result == "agent"
         assert agent_mod.TOOL_USE_ENFORCEMENT in captured["system_prompt"]
+        assert "Current configured model: anthropic:claude-sonnet-4-6" in captured["system_prompt"]
         assert agent_mod.OPENAI_MODEL_EXECUTION_GUIDANCE not in captured["system_prompt"]
 
 
