@@ -383,6 +383,28 @@ class TestSchedulerTick:
         channel.send.assert_not_called()
 
     @pytest.mark.asyncio
+    async def test_run_job_silent_sentinel_suffix_skips_delivery(self, tmp_path):
+        f = tmp_path / "jobs.json"
+        job = _make_job()
+
+        agent = AsyncMock()
+        agent.ainvoke = AsyncMock(
+            return_value={
+                "messages": [MagicMock(content=f"No changes detected.\n\n{CRON_SILENT_SENTINEL}\n")]
+            }
+        )
+        channel = AsyncMock()
+        channel.name = "telegram"
+
+        scheduler = Scheduler(
+            jobs_path=f, agent=agent, checkpointer=None, channels={"telegram": channel}
+        )
+
+        await scheduler.run_job(job)
+
+        channel.send.assert_not_called()
+
+    @pytest.mark.asyncio
     async def test_run_job_uses_fresh_thread_id_per_invocation(self, tmp_path):
         f = tmp_path / "jobs.json"
         job = _make_job()
