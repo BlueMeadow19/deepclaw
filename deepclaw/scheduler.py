@@ -342,7 +342,7 @@ class Scheduler:
             response = f"Cron job '{job.name}' failed to execute."
 
         response = redact_secrets(str(response)).strip()
-        if response == CRON_SILENT_SENTINEL:
+        if response == CRON_SILENT_SENTINEL or response.endswith(CRON_SILENT_SENTINEL):
             logger.info("Cron job '%s' returned silent sentinel; skipping delivery", job.name)
             return
 
