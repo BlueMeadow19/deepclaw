@@ -64,7 +64,6 @@ def test_codex_model_selection_and_generation_handoff(monkeypatch, tmp_path):
     monkeypatch.setattr(codex, "CHATGPT_AUTH_STORE_PATH", tmp_path / "chatgpt-auth.json")
     monkeypatch.setattr(codex, "load_openai_codex_symbols", _symbols)
     config = DeepClawConfig(model="openai_codex:gpt-5.3-codex")
-    config.generation.temperature = 0.2
     config.generation.top_p = 0.8
 
     model = codex.resolve_openai_codex_model(config)
@@ -74,7 +73,6 @@ def test_codex_model_selection_and_generation_handoff(monkeypatch, tmp_path):
         "model": "gpt-5.3-codex",
         "token_provider": model.kwargs["token_provider"],
         "originator": "deepclaw",
-        "temperature": 0.2,
         "top_p": 0.8,
     }
     assert model.kwargs["token_provider"].path == tmp_path / "chatgpt-auth.json"
@@ -103,6 +101,33 @@ def test_actual_codex_model_rejects_unsupported_repetition_penalty(monkeypatch):
 
     assert "openai_codex:*" in str(exc_info.value)
     assert _ChatOpenAICodex is not None
+
+
+def test_actual_codex_model_drops_temperature_and_resolver_rejects_it(monkeypatch, tmp_path):
+    from langchain_openai.chat_models.codex import _ChatOpenAICodex
+
+    upstream_model = _ChatOpenAICodex(
+        model="gpt-5.3-codex",
+        token_provider=FakeProvider(path=tmp_path / "chatgpt-auth.json"),
+        temperature=0.2,
+    )
+    assert upstream_model.temperature is None
+    assert "temperature" not in upstream_model._default_params
+
+    config = DeepClawConfig(model="openai_codex:gpt-5.3-codex")
+    config.generation.temperature = 0.2
+    monkeypatch.setattr(
+        codex,
+        "load_openai_codex_symbols",
+        lambda: (_ for _ in ()).throw(AssertionError("model construction should not run")),
+    )
+
+    with pytest.raises(ValueError, match="generation.temperature") as exc_info:
+        codex.resolve_openai_codex_model(config)
+
+    message = str(exc_info.value)
+    assert "openai_codex:*" in message
+    assert "silently drops temperature" in message
 
 
 def test_codex_model_rejects_unsupported_max_tokens_before_construction(monkeypatch):

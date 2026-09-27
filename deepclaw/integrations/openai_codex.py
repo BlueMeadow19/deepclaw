@@ -187,6 +187,13 @@ def resolve_openai_codex_model(config: DeepClawConfig):
             "generation.max_tokens or use a provider that supports it."
         )
         raise ValueError(msg)
+    if generation.temperature is not None:
+        msg = (
+            "generation.temperature is unsupported for openai_codex:* models: "
+            "the pinned Codex client silently drops temperature from Responses API requests. "
+            "Remove generation.temperature or use a provider that supports it."
+        )
+        raise ValueError(msg)
 
     provider_class, _, chat_model_class = load_openai_codex_symbols()
     token_provider = _DeepClawTokenProvider(provider_class(path=CHATGPT_AUTH_STORE_PATH))
