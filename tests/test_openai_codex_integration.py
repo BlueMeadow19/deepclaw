@@ -319,6 +319,202 @@ def test_login_uses_browser_helper_and_logout_only_removes_deepclaw_store(monkey
     assert codex.logout_openai_codex() is False
 
 
+@pytest.fixture
+def paste_flow(monkeypatch, tmp_path, capsys):
+    from urllib.parse import parse_qs, urlsplit
+
+    path = tmp_path / "auth" / "chatgpt-auth.json"
+    other = tmp_path / ".codex" / "auth.json"
+    other.parent.mkdir()
+    other.write_text("keep")
+    monkeypatch.setattr(codex, "CHATGPT_AUTH_STORE_PATH", path)
+    oauth = codex.import_module("langchain_openai.chatgpt_oauth")
+    pkce = MagicMock(return_value=("secret-verifier", "challenge"))
+    build = MagicMock(side_effect=oauth._build_authorize_url)
+    post = MagicMock(
+        return_value={
+            "access_token": "secret-access",
+            "refresh_token": "secret-refresh",
+            "expires_in": 3600,
+        }
+    )
+    token = MagicMock(return_value=FakeToken())
+    saved = []
+
+    class Store:
+        def __init__(self, *, path, client_id):
+            assert path == tmp_path / "auth" / "chatgpt-auth.json"
+            assert client_id == oauth.CHATGPT_CLIENT_ID
+
+        def save(self, value):
+            saved.append(value)
+
+    monkeypatch.setattr(oauth, "_generate_pkce_pair", pkce)
+    monkeypatch.setattr(oauth, "_build_authorize_url", build)
+    monkeypatch.setattr(oauth, "_post_form", post)
+    monkeypatch.setattr(oauth, "_token_from_response", token)
+    monkeypatch.setattr(oauth, "_FileChatGPTOAuthTokenProvider", Store)
+    monkeypatch.setattr(
+        codex.secrets, "token_urlsafe", lambda size: "secret-state" if size == 32 else None
+    )
+
+    def run(pasted):
+        monkeypatch.setattr(codex.getpass, "getpass", lambda prompt: pasted)
+        codex.login_openai_codex_paste()
+        output = capsys.readouterr().out
+        assert "secret-verifier" not in output
+        assert pasted not in output
+        assert "secret-access" not in output
+        assert "secret-refresh" not in output
+        assert other.read_text() == "keep"
+        url = output.split("  https://auth.openai.com/oauth/authorize?", 1)[1].splitlines()[0]
+        params = parse_qs(urlsplit("https://auth.openai.com/oauth/authorize?" + url).query)
+        return params
+
+    return run, post, saved, path, build, token
+
+
+@pytest.mark.parametrize("kind", ["url", "query", "raw"])
+def test_paste_login_exchanges_and_saves_only_own_store(paste_flow, kind):
+    run, post, saved, path, build, token = paste_flow
+    query = "code=secret-code&state=secret-state"
+    pasted = (
+        "http://localhost:1455/auth/callback?" + query
+        if kind == "url"
+        else "?" + query
+        if kind == "query"
+        else "secret-code"
+    )
+    params = run(pasted)
+    assert params["redirect_uri"] == ["http://localhost:1455/auth/callback"]
+    assert params["state"] == ["secret-state"]
+    assert params["code_challenge"] == ["challenge"]
+    assert (
+        build.call_args.kwargs["scope"]
+        == codex.import_module("langchain_openai.chatgpt_oauth").DEFAULT_SCOPE
+    )
+    post.assert_called_once_with(
+        codex.import_module("langchain_openai.chatgpt_oauth").CHATGPT_TOKEN_URL,
+        {
+            "grant_type": "authorization_code",
+            "code": "secret-code",
+            "redirect_uri": "http://localhost:1455/auth/callback",
+            "client_id": codex.import_module("langchain_openai.chatgpt_oauth").CHATGPT_CLIENT_ID,
+            "code_verifier": "secret-verifier",
+        },
+    )
+    token.assert_called_once_with(post.return_value)
+    assert saved == [token.return_value]
+    assert not path.exists()  # fake provider captures save; it does not write
+
+
+@pytest.mark.parametrize(
+    "pasted",
+    [
+        "",
+        "?code=secret-code&state=bad",
+        "?code=secret-code",
+        "?error=denied&state=secret-state",
+        "?code=secret-code&state=secret-state&code=other",
+        "?code=secret-code&state=secret-state&state=other",
+        "?code=&state=secret-state",
+        "?code=secret-code&state=secret-state&error=denied",
+        "?code=secret-code&state=secret-state&extra=bad",
+        "?code=secret-code&state=secret-state#fragment",
+        "https://localhost:1455/auth/callback?code=secret-code&state=secret-state",
+        "http://127.0.0.1:1455/auth/callback?code=secret-code&state=secret-state",
+        "http://user@localhost:1455/auth/callback?code=secret-code&state=secret-state",
+        "http://localhost:1456/auth/callback?code=secret-code&state=secret-state",
+        "http://localhost:1455/wrong?code=secret-code&state=secret-state",
+        "http://localhost:1455/auth/callback?code=secret-code&state=secret-state#fragment",
+    ],
+)
+def test_paste_validation_fails_closed_without_exchange(paste_flow, pasted):
+    run, post, saved, *_ = paste_flow
+    with pytest.raises(codex.OpenAICodexAuthError) as exc:
+        run(pasted)
+    assert "secret-code" not in "".join(traceback.format_exception(exc.value))
+    assert exc.value.__cause__ is None
+    post.assert_not_called()
+    assert not saved
+
+
+def test_paste_upstream_failure_does_not_leak(paste_flow, capsys):
+    run, post, saved, *_ = paste_flow
+    post.side_effect = RuntimeError("secret-code secret-verifier secret-access")
+    pasted = "?code=secret-code&state=secret-state"
+    with pytest.raises(codex.OpenAICodexAuthError) as exc:
+        run(pasted)
+    assert "secret-code" not in "".join(traceback.format_exception(exc.value))
+    assert exc.value.__cause__ is None
+    assert not saved
+    assert "secret-code" not in capsys.readouterr().out
+
+
+def test_paste_rejects_getpass_non_tty_echo_fallback(paste_flow, monkeypatch):
+    _, post, saved, *_ = paste_flow
+
+    def fallback(_prompt):
+        import warnings
+
+        warnings.warn("No terminal input", codex.getpass.GetPassWarning, stacklevel=2)
+        return "secret-code"
+
+    monkeypatch.setattr(codex.getpass, "getpass", fallback)
+    with pytest.raises(codex.OpenAICodexAuthError, match="interactive terminal"):
+        codex.login_openai_codex_paste()
+    post.assert_not_called()
+    assert not saved
+
+
+def test_paste_real_upstream_storage_without_network(monkeypatch, tmp_path, capsys):
+    oauth = codex.import_module("langchain_openai.chatgpt_oauth")
+    path = tmp_path / "auth" / "chatgpt-auth.json"
+    other = tmp_path / ".codex" / "auth.json"
+    other.parent.mkdir()
+    other.write_text("keep")
+    monkeypatch.setattr(codex, "CHATGPT_AUTH_STORE_PATH", path)
+    monkeypatch.setattr(codex.secrets, "token_urlsafe", lambda _size: "known-state")
+    post = MagicMock(
+        return_value={
+            "access_token": "real-test-access",
+            "refresh_token": "real-test-refresh",
+            "expires_in": 3600,
+        }
+    )
+    monkeypatch.setattr(oauth, "_post_form", post)
+    monkeypatch.setattr(
+        codex.getpass,
+        "getpass",
+        lambda _prompt: "http://localhost:1455/auth/callback?code=test-code&state=known-state",
+    )
+
+    codex.login_openai_codex_paste()
+
+    assert post.call_count == 1
+    assert path.is_file()
+    assert (
+        oauth._FileChatGPTOAuthTokenProvider(path=path).get_token().access_token
+        == "real-test-access"
+    )
+    assert other.read_text() == "keep"
+    output = capsys.readouterr().out
+    assert "test-code" not in output
+    assert "real-test-access" not in output
+
+
+def test_cli_paste_failure_is_actionable_and_secret_free(monkeypatch, capsys):
+    def fail():
+        raise codex.OpenAICodexAuthError(
+            "OAuth callback state mismatch. Restart login and try again."
+        )
+
+    monkeypatch.setattr(codex, "login_openai_codex_paste", fail)
+    with pytest.raises(SystemExit, match="1"):
+        cli._handle_auth_command(["login", "openai_codex", "--paste"])
+    assert "state mismatch" in capsys.readouterr().out
+
+
 def test_logout_maps_store_unlink_errors_without_leaking_details(monkeypatch, tmp_path):
     path = tmp_path / "auth" / "chatgpt-auth.json"
     path.parent.mkdir()
@@ -455,6 +651,42 @@ def test_cli_login_failure_and_unknown_auth_command(monkeypatch, capsys):
     assert "login failed" in capsys.readouterr().out.lower()
     with pytest.raises(SystemExit, match="1"):
         cli._handle_auth_command(["wat", "openai_codex"])
+
+
+def test_cli_selects_browser_or_paste_login(monkeypatch, capsys):
+    browser_login = MagicMock()
+    paste_login = MagicMock()
+    monkeypatch.setattr(codex, "login_openai_codex", browser_login)
+    monkeypatch.setattr(codex, "login_openai_codex_paste", paste_login)
+
+    cli._handle_auth_command(["login", "openai_codex"])
+    browser_login.assert_called_once_with()
+    paste_login.assert_not_called()
+
+    cli._handle_auth_command(["login", "openai_codex", "--paste"])
+    paste_login.assert_called_once_with()
+    assert "login completed" in capsys.readouterr().out.lower()
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        [],
+        ["login"],
+        ["login", "openai_codex", "--browser"],
+        ["login", "openai_codex", "--device"],
+        ["login", "openai_codex", "--paste", "extra"],
+        ["status", "openai_codex", "--paste"],
+        ["logout", "openai_codex", "--paste"],
+        ["login", "other"],
+    ],
+)
+def test_cli_auth_usage_rejects_non_exact_forms(capsys, args):
+    with pytest.raises(SystemExit, match="1"):
+        cli._handle_auth_command(args)
+
+    output = capsys.readouterr().out
+    assert "Usage: deepclaw auth login openai_codex [--paste]" in output
 
 
 @pytest.mark.parametrize("action", ["login", "status"])

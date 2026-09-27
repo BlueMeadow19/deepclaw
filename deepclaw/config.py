@@ -228,7 +228,9 @@ DEFAULT_CONFIG_YAML = """\
 # model: "baseten:https://model-<id>.api.baseten.co/environments/production/sync/v1"
 # Experimental/unofficial OpenAI Codex subscription OAuth (private API):
 # model: "openai_codex:gpt-5.3-codex"
-# First run: `deepclaw auth login openai_codex`. Credentials are stored at
+# First run: `deepclaw auth login openai_codex` (or append `--paste` on a
+# remote server; paste the failed localhost redirect URL from your browser).
+# No browser-to-server connection is required. Credentials are stored at
 # ~/.deepclaw/auth/chatgpt-auth.json, separate from the Codex CLI store.
 # On an expired session, run the login command again, then restart with:
 # systemctl --user restart deepclaw

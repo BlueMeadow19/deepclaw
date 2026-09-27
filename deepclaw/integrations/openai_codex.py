@@ -7,9 +7,13 @@ credential-store location and non-secret status presentation.
 
 from __future__ import annotations
 
+import getpass
+import secrets
+import warnings
 from importlib import import_module
 from pathlib import Path
 from typing import Any
+from urllib.parse import parse_qsl, urlsplit
 
 from deepclaw.config import DeepClawConfig
 
@@ -50,6 +54,33 @@ def load_openai_codex_symbols():
             "version exposing chatgpt_oauth and _ChatOpenAICodex. Run `uv sync`."
         )
         raise OpenAICodexDependencyError(msg) from exc
+
+
+def load_openai_codex_paste_primitives():
+    """Load pinned upstream OAuth primitives without starting a callback server."""
+    try:
+        oauth_module = import_module("langchain_openai.chatgpt_oauth")
+        for symbol in (
+            "_generate_pkce_pair",
+            "_build_authorize_url",
+            "_post_form",
+            "_token_from_response",
+            "_FileChatGPTOAuthTokenProvider",
+            "CHATGPT_CLIENT_ID",
+            "CHATGPT_TOKEN_URL",
+            "DEFAULT_REDIRECT_HOST",
+            "DEFAULT_REDIRECT_PORT",
+            "DEFAULT_REDIRECT_PATH",
+            "DEFAULT_SCOPE",
+        ):
+            getattr(oauth_module, symbol)
+        return oauth_module
+    except (ImportError, AttributeError):
+        msg = (
+            "Pasted OpenAI Codex OAuth requires langchain-openai==1.3.2 "
+            "with chatgpt_oauth helpers. Run `uv sync`."
+        )
+        raise OpenAICodexDependencyError(msg) from None
 
 
 def _auth_error() -> OpenAICodexAuthError:
@@ -149,6 +180,129 @@ def login_openai_codex() -> None:
     _, login_chatgpt, _ = load_openai_codex_symbols()
     CHATGPT_AUTH_STORE_PATH.parent.mkdir(parents=True, exist_ok=True)
     login_chatgpt(store_path=CHATGPT_AUTH_STORE_PATH)
+
+
+def _pasted_authorization_code(pasted: str, *, redirect_uri: str, state: str) -> str:
+    """Validate a pasted localhost callback (or query) before any token request."""
+    pasted = pasted.strip()
+    if not pasted:
+        raise OpenAICodexAuthError("No OAuth callback supplied. Paste the full redirect URL.")
+
+    if pasted.startswith("?") or "://" in pasted:
+        if pasted.startswith("?"):
+            query = pasted[1:]
+            if "#" in query:
+                raise OpenAICodexAuthError("OAuth callback must not contain a fragment.")
+        else:
+            try:
+                parsed = urlsplit(pasted)
+                expected = urlsplit(redirect_uri)
+                if (
+                    parsed.scheme != expected.scheme
+                    or parsed.netloc != expected.netloc
+                    or parsed.path != expected.path
+                    or parsed.username is not None
+                    or parsed.password is not None
+                    or "#" in pasted
+                ):
+                    raise OpenAICodexAuthError(
+                        "OAuth redirect origin or path is not the expected localhost callback."
+                    )
+            except ValueError:
+                raise OpenAICodexAuthError("Invalid OAuth redirect URL.") from None
+            query = parsed.query
+        try:
+            pairs = parse_qsl(query, keep_blank_values=True, strict_parsing=True)
+        except ValueError:
+            raise OpenAICodexAuthError("Malformed OAuth callback query.") from None
+        values: dict[str, str] = {}
+        for key, value in pairs:
+            if key not in {"code", "state", "error", "error_description"} or key in values:
+                raise OpenAICodexAuthError("Unexpected or duplicate OAuth callback parameter.")
+            values[key] = value
+        if not values.get("state") or not secrets.compare_digest(values["state"], state):
+            raise OpenAICodexAuthError(
+                "OAuth callback state mismatch. Restart login and try again."
+            )
+        if "error" in values or "error_description" in values:
+            raise OpenAICodexAuthError(
+                "Authorization was denied or failed. Restart login and try again."
+            )
+        if not values.get("code"):
+            raise OpenAICodexAuthError("OAuth callback has no authorization code. Restart login.")
+        return values["code"]
+
+    # Only direct, trusted terminal input may bypass state validation; PKCE still binds the code.
+    if any(char.isspace() or char in "/?:#&=%" for char in pasted):
+        raise OpenAICodexAuthError(
+            "Invalid authorization code. Paste the full redirect URL instead."
+        )
+    return pasted
+
+
+def login_openai_codex_paste() -> None:
+    """Exchange a pasted browser redirect; never bind a server or open a browser."""
+    oauth = load_openai_codex_paste_primitives()
+    redirect_uri = (
+        f"http://{oauth.DEFAULT_REDIRECT_HOST}:{oauth.DEFAULT_REDIRECT_PORT}"
+        f"{oauth.DEFAULT_REDIRECT_PATH}"
+    )
+    try:
+        state = secrets.token_urlsafe(32)
+        verifier, challenge = oauth._generate_pkce_pair()
+        authorize_url = oauth._build_authorize_url(
+            client_id=oauth.CHATGPT_CLIENT_ID,
+            redirect_uri=redirect_uri,
+            state=state,
+            code_challenge=challenge,
+            scope=oauth.DEFAULT_SCOPE,
+        )
+    except Exception:
+        raise OpenAICodexAuthError(
+            "Could not start OAuth login. Run `uv sync` and try again."
+        ) from None
+
+    print(f"\nOpen this authorization URL in your local browser:\n  {authorize_url}\n")  # noqa: T201
+    print(  # noqa: T201
+        "The localhost page may fail to load: that is expected on a remote server. "
+        "Copy its full address-bar URL and paste it below. A ?code=...&state=... query "
+        "also works. Full URL/query is preferred: a raw code cannot be state-checked "
+        "(PKCE still applies). Do not share the redirect or code."
+    )
+    try:
+        # An authorization code is a short-lived secret. Refuse getpass's
+        # non-TTY echo fallback rather than exposing the pasted URL in a log.
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", getpass.GetPassWarning)
+            pasted = getpass.getpass("Paste redirect URL, query, or raw code (hidden): ")
+    except getpass.GetPassWarning:
+        raise OpenAICodexAuthError(
+            "Paste login requires an interactive terminal so the code is not echoed."
+        ) from None
+    except (EOFError, KeyboardInterrupt):
+        raise OpenAICodexAuthError("Login cancelled. Run the login command again.") from None
+    code = _pasted_authorization_code(pasted, redirect_uri=redirect_uri, state=state)
+    try:
+        response = oauth._post_form(
+            oauth.CHATGPT_TOKEN_URL,
+            {
+                "grant_type": "authorization_code",
+                "code": code,
+                "redirect_uri": redirect_uri,
+                "client_id": oauth.CHATGPT_CLIENT_ID,
+                "code_verifier": verifier,
+            },
+        )
+        token = oauth._token_from_response(response)
+        provider = oauth._FileChatGPTOAuthTokenProvider(
+            path=CHATGPT_AUTH_STORE_PATH, client_id=oauth.CHATGPT_CLIENT_ID
+        )
+        provider.save(token)
+    except Exception:
+        raise OpenAICodexAuthError(
+            "OAuth exchange or credential save failed. Restart login and check network and "
+            "~/.deepclaw/auth/ permissions."
+        ) from None
 
 
 def logout_openai_codex() -> bool:

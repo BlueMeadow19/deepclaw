@@ -55,34 +55,52 @@ def _handle_service_command(args: list[str]) -> None:
 
 
 def _handle_auth_command(args: list[str]) -> None:
-    """Handle ``deepclaw auth {login|status|logout} openai_codex``."""
-    usage = "Usage: deepclaw auth {login|status|logout} openai_codex"
-    if len(args) != 2 or args[1] != "openai_codex":
+    """Handle OpenAI Codex browser/pasted login, status, and logout commands."""
+    usage = (
+        "Usage: deepclaw auth login openai_codex [--paste]\n"
+        "       deepclaw auth {status|logout} openai_codex"
+    )
+    browser_login = args == ["login", "openai_codex"]
+    paste_login = args == ["login", "openai_codex", "--paste"]
+    status_or_logout = (
+        len(args) == 2 and args[0] in {"status", "logout"} and args[1] == "openai_codex"
+    )
+    if not (browser_login or paste_login or status_or_logout):
+        if args and args[0] not in {"login", "status", "logout"}:
+            print(f"Unknown auth subcommand: {args[0]}")  # noqa: T201
         print(usage)  # noqa: T201
         raise SystemExit(1)
 
     action = args[0]
-    if action not in {"login", "status", "logout"}:
-        print(f"Unknown auth subcommand: {action}")  # noqa: T201
-        print(usage)  # noqa: T201
-        raise SystemExit(1)
 
     from deepclaw.integrations.openai_codex import (
         OpenAICodexAuthError,
         OpenAICodexDependencyError,
         get_openai_codex_auth_status,
         login_openai_codex,
+        login_openai_codex_paste,
         logout_openai_codex,
     )
 
     if action == "login":
         try:
-            login_openai_codex()
+            if paste_login:
+                login_openai_codex_paste()
+            else:
+                login_openai_codex()
         except OpenAICodexDependencyError as exc:
             print(str(exc))  # noqa: T201
             raise SystemExit(1) from None
+        except OpenAICodexAuthError as exc:
+            print(str(exc))  # noqa: T201
+            raise SystemExit(1) from None
         except Exception:
-            print("OpenAI Codex login failed. Run `deepclaw auth login openai_codex` to try again.")  # noqa: T201
+            command = (
+                "deepclaw auth login openai_codex --paste"
+                if paste_login
+                else "deepclaw auth login openai_codex"
+            )
+            print(f"OpenAI Codex login failed. Run `{command}` to try again.")  # noqa: T201
             raise SystemExit(1) from None
         print("OpenAI Codex login completed.")  # noqa: T201
         return

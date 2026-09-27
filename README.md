@@ -123,16 +123,33 @@ export BASETEN_API_KEY=***
 uv run deepclaw auth login openai_codex
 ```
 
+For a remote/headless server, use pasted redirect login instead (no callback server
+or browser-to-server network access required):
+
+```bash
+uv run deepclaw auth login openai_codex --paste
+```
+
+Open the printed authorization URL in your own local browser. After sign-in, the
+`http://localhost:1455/auth/callback?...` page may fail to load: this is expected,
+because localhost refers to your browser's machine, not the remote server. Copy
+the **full URL from the address bar** and paste it into the DeepClaw terminal.
+The paste prompt hides what you type; it will appear blank while you paste.
+Alternatively paste its `?code=...&state=...` query. A raw authorization code
+is accepted from the trusted terminal, but cannot be state-checked (PKCE still
+applies); prefer the full URL/query. Treat the redirect and authorization URL
+as sensitive; do not share or log them. No SSH port forwarding is needed.
+
 Then configure `openai_codex:gpt-5.3-codex`:
 
 ```yaml
 model: "openai_codex:gpt-5.3-codex"
 ```
 
-This is an experimental, unofficial integration using a private OpenAI API. The browser
-login stores subscription credentials at `~/.deepclaw/auth/chatgpt-auth.json`, deliberately
+This is an experimental, unofficial integration using a private OpenAI API. Both login
+modes store subscription credentials at `~/.deepclaw/auth/chatgpt-auth.json`, deliberately
 separate from `~/.codex/auth.json` used by the Codex CLI. Do not copy this file or commit it.
-If the session expires or refresh fails, run `uv run deepclaw auth login openai_codex` again and
+If the session expires or refresh fails, run the appropriate login command again and
 restart the service with `systemctl --user restart deepclaw`. After `uv run deepclaw auth logout
 openai_codex`, also restart the service: an already-running service may retain cached credentials
 until it restarts. Vision and TTS each use `OPENAI_API_KEY`, not ChatGPT subscription OAuth.
