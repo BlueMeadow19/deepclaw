@@ -19,7 +19,7 @@ from deepclaw.config import DeepClawConfig
 
 OPENAI_CODEX_PROVIDER = "openai_codex"
 CHATGPT_AUTH_STORE_PATH = Path("~/.deepclaw/auth/chatgpt-auth.json").expanduser()
-_LOGIN_COMMAND = "deepclaw auth login openai_codex"
+_LOGIN_COMMAND = "deepclaw auth login openai_codex --paste"
 
 
 class OpenAICodexError(RuntimeError):

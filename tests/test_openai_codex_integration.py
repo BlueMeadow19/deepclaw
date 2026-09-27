@@ -717,7 +717,7 @@ def test_doctor_codex_auth_branches(monkeypatch):
     monkeypatch.setattr(codex, "get_openai_codex_auth_status", lambda: {"logged_in": False})
     missing = check_llm_api_key(config)
     assert missing.status == STATUS_FAIL
-    assert "deepclaw auth login openai_codex" in missing.message
+    assert "deepclaw auth login openai_codex --paste" in missing.message
 
     monkeypatch.setattr(
         codex,

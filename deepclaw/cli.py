@@ -111,7 +111,9 @@ def _handle_auth_command(args: list[str]) -> None:
             print(str(exc))  # noqa: T201
             raise SystemExit(1) from None
         if not status["logged_in"]:
-            print("OpenAI Codex is not logged in. Run `deepclaw auth login openai_codex`.")  # noqa: T201
+            print(  # noqa: T201
+                "OpenAI Codex is not logged in. On this remote server, run `deepclaw auth login openai_codex --paste`."
+            )
             return
         details = [
             f"{key}={status[key]}"

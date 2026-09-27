@@ -87,13 +87,13 @@ def check_llm_api_key(config: DeepClawConfig | None = None) -> Check:
                 "OpenAI Codex OAuth",
                 STATUS_FAIL,
                 "Credentials are expired, corrupt, or could not be refreshed. "
-                "Run `deepclaw auth login openai_codex`.",
+                "Run `deepclaw auth login openai_codex --paste` on a remote server.",
             )
         if not status["logged_in"]:
             return Check(
                 "OpenAI Codex OAuth",
                 STATUS_FAIL,
-                "No credentials found. Run `deepclaw auth login openai_codex`.",
+                "No credentials found. Run `deepclaw auth login openai_codex --paste` on a remote server.",
             )
         details = [
             f"{key}={status[key]}"
