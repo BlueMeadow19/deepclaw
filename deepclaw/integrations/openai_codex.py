@@ -217,8 +217,13 @@ def _pasted_authorization_code(pasted: str, *, redirect_uri: str, state: str) ->
             raise OpenAICodexAuthError("Malformed OAuth callback query.") from None
         values: dict[str, str] = {}
         for key, value in pairs:
-            if key not in {"code", "state", "error", "error_description"} or key in values:
-                raise OpenAICodexAuthError("Unexpected or duplicate OAuth callback parameter.")
+            # OpenAI also includes fields such as `scope` in real callbacks.
+            # Like upstream's listener, use only the OAuth fields we need;
+            # unlike upstream, reject ambiguous duplicates of those fields.
+            if key not in {"code", "state", "error", "error_description"}:
+                continue
+            if key in values:
+                raise OpenAICodexAuthError("Duplicate OAuth callback parameter.")
             values[key] = value
         if not values.get("state") or not secrets.compare_digest(values["state"], state):
             raise OpenAICodexAuthError(

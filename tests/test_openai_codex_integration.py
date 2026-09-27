@@ -408,6 +408,16 @@ def test_paste_login_exchanges_and_saves_only_own_store(paste_flow, kind):
     assert not path.exists()  # fake provider captures save; it does not write
 
 
+@pytest.mark.parametrize("kind", ["url", "query"])
+def test_paste_login_accepts_openai_scope_parameter(paste_flow, kind):
+    run, post, saved, *_ = paste_flow
+    query = "code=secret-code&scope=openid+profile+email+offline_access&state=secret-state"
+    pasted = "http://localhost:1455/auth/callback?" + query if kind == "url" else "?" + query
+    run(pasted)
+    assert post.call_args.args[1]["code"] == "secret-code"
+    assert len(saved) == 1
+
+
 @pytest.mark.parametrize(
     "pasted",
     [
@@ -419,7 +429,6 @@ def test_paste_login_exchanges_and_saves_only_own_store(paste_flow, kind):
         "?code=secret-code&state=secret-state&state=other",
         "?code=&state=secret-state",
         "?code=secret-code&state=secret-state&error=denied",
-        "?code=secret-code&state=secret-state&extra=bad",
         "?code=secret-code&state=secret-state#fragment",
         "https://localhost:1455/auth/callback?code=secret-code&state=secret-state",
         "http://127.0.0.1:1455/auth/callback?code=secret-code&state=secret-state",
