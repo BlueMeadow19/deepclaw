@@ -117,12 +117,33 @@ export DEEPCLAW_MODEL='baseten:https://model-<id>.api.baseten.co/environments/pr
 export BASETEN_API_KEY=***
 ```
 
+**OpenAI Codex subscription OAuth (experimental):**
+
+```bash
+uv run deepclaw auth login openai_codex
+```
+
+Then configure `openai_codex:gpt-5.3-codex`:
+
+```yaml
+model: "openai_codex:gpt-5.3-codex"
+```
+
+This is an experimental, unofficial integration using a private OpenAI API. The browser
+login stores subscription credentials at `~/.deepclaw/auth/chatgpt-auth.json`, deliberately
+separate from `~/.codex/auth.json` used by the Codex CLI. Do not copy this file or commit it.
+If the session expires or refresh fails, run `uv run deepclaw auth login openai_codex` again and
+restart the service with `systemctl --user restart deepclaw`. After `uv run deepclaw auth logout
+openai_codex`, also restart the service: an already-running service may retain cached credentials
+until it restarts. Vision and TTS each use `OPENAI_API_KEY`, not ChatGPT subscription OAuth.
+
 Supported providers (requires the provider's API key and langchain package):
 
 | Provider | Model example | API key env var | Package |
 |---|---|---|---|
 | Anthropic | `anthropic:claude-sonnet-4-6` | `ANTHROPIC_API_KEY` | (included) |
 | OpenAI | `openai:gpt-4o` | `OPENAI_API_KEY` | `langchain-openai` |
+| OpenAI Codex OAuth (experimental/private API) | `openai_codex:gpt-5.3-codex` | ChatGPT subscription login | `langchain-openai==1.3.2` |
 | DeepInfra | `deepinfra:deepseek-ai/DeepSeek-V3` | `DEEPINFRA_API_TOKEN` | `langchain-community` |
 | Baseten | `baseten:moonshotai/Kimi-K2-Instruct-0905` or `baseten:https://model-<id>.api.baseten.co/environments/production/sync/v1` | `BASETEN_API_KEY` | `langchain-baseten` |
 | Google | `google-genai:gemini-2.5-pro` | `GOOGLE_API_KEY` | `langchain-google-genai` |
