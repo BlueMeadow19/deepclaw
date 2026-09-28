@@ -299,14 +299,29 @@ def login_openai_codex_paste() -> None:
             },
         )
         token = oauth._token_from_response(response)
+    except Exception as exc:
+        # Upstream includes the raw provider response in its exception text.
+        # Never echo it: OAuth errors can contain user-controlled data.
+        if str(exc).startswith(
+            f"OAuth request to {oauth.CHATGPT_TOKEN_URL} failed with status 401:"
+        ):
+            raise OpenAICodexAuthError(
+                "OpenAI rejected the OAuth token exchange (401). Start a fresh --paste login; "
+                "open that invocation's authorization URL and paste its full callback into "
+                "the same waiting terminal promptly. If a fresh attempt still fails, "
+                "the upstream OAuth flow or account access may be incompatible."
+            ) from None
+        raise OpenAICodexAuthError(
+            "OAuth token exchange failed. Start a fresh login and check network access."
+        ) from None
+    try:
         provider = oauth._FileChatGPTOAuthTokenProvider(
             path=CHATGPT_AUTH_STORE_PATH, client_id=oauth.CHATGPT_CLIENT_ID
         )
         provider.save(token)
     except Exception:
         raise OpenAICodexAuthError(
-            "OAuth exchange or credential save failed. Restart login and check network and "
-            "~/.deepclaw/auth/ permissions."
+            "OAuth credential save failed. Check ~/.deepclaw/auth/ permissions."
         ) from None
 
 

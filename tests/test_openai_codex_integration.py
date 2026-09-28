@@ -460,6 +460,39 @@ def test_paste_upstream_failure_does_not_leak(paste_flow, capsys):
     assert "secret-code" not in capsys.readouterr().out
 
 
+def test_paste_401_explains_fresh_same_session_and_hides_provider_body(paste_flow):
+    run, post, saved, *_ = paste_flow
+    post.side_effect = RuntimeError(
+        "OAuth request to https://auth.openai.com/oauth/token failed with status 401: "
+        "{'error': {'code': 'token_expired', 'message': 'secret-code secret-access'}}"
+    )
+    pasted = "?code=secret-code&state=secret-state"
+    with pytest.raises(codex.OpenAICodexAuthError) as exc:
+        run(pasted)
+    assert "401" in str(exc.value)
+    assert "same waiting terminal" in str(exc.value)
+    assert "secret-code" not in "".join(traceback.format_exception(exc.value))
+    assert "secret-access" not in "".join(traceback.format_exception(exc.value))
+    assert exc.value.__cause__ is None
+    assert not saved
+
+
+def test_paste_save_error_does_not_claim_exchange_failure(paste_flow, monkeypatch):
+    run, post, saved, _, _, _ = paste_flow
+    oauth = codex.import_module("langchain_openai.chatgpt_oauth")
+    monkeypatch.setattr(
+        oauth,
+        "_FileChatGPTOAuthTokenProvider",
+        MagicMock(side_effect=OSError("secret-access")),
+    )
+    with pytest.raises(codex.OpenAICodexAuthError, match="credential save failed") as exc:
+        run("?code=secret-code&state=secret-state")
+    post.assert_called_once()
+    assert "secret-access" not in "".join(traceback.format_exception(exc.value))
+    assert exc.value.__cause__ is None
+    assert not saved
+
+
 def test_paste_rejects_getpass_non_tty_echo_fallback(paste_flow, monkeypatch):
     _, post, saved, *_ = paste_flow
 
